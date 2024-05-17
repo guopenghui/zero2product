@@ -1,0 +1,147 @@
+# workflow的名字，会显示在github库的action列表中
+name: Rust
+    
+# 什么时候触发workflow
+on:
+  push:
+    branches: 
+      - master
+
+env:
+  CARGO_TERM_COLOR: always
+  SQLX_VERSION: 0.7.4
+  SQLX_FEATURES: "rustls,postgres"
+
+# workflow由若干个 job 构成，默认情况下并行执行
+# runs-on 指定运行环境
+jobs:
+  # job 的标识符
+  test:
+    # Github 上面显示的名字
+    name: Test
+    runs-on: ubuntu-latest
+    # 运行test job，需要哪些服务的帮助
+    services:
+      postgres:
+        image: postgres:latest
+        # 环境变量
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password 
+          POSTGRES_DB: postgres
+        ports:
+          - 8800:5432
+    steps:
+      # 从github仓库下载代码
+      - name: Check out repository code
+        # 这个指令会把代码下载到执行器中
+        uses: actions/checkout@v3
+      
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      
+      # 智能缓存 rust/cargo 项目
+      - name: Rust Cache Action
+        uses: Swatinem/rust-cache@v2
+        with:
+          # 附加的缓存 key
+          key: sqlx-${{ env.SQLX_VERSION }}
+      
+      - name: Install sqlx-cli
+        run:
+          cargo install sqlx-cli
+          --version=${{ env.SQLX_VERSION }}
+          --features=${{ env.SQLX_FEATURES }}
+          --no-default-features
+          --locked
+          # locked 表示使用 Cargo.lock，来提高可重复性
+     
+      - name: Install postgresql-client
+        run: sudo apt-get update && sudo apt-get install postgresql-client -y
+      
+      - name: Migrate datebase
+        run: chmod +x ./scripts/init_db.sh && SKIP_DOCKER=true ./scripts/init_db.sh
+      
+      - name: Run tests
+        run: cargo test  
+
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@stable 
+        with:
+          # dtolnay/rust-toolchain@stable 接收的参数，用逗号分隔
+          components: rustfmt
+      - name: Enforce formatting
+        run: cargo fmt --check
+          
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password 
+          POSTGRES_DB: postgres
+        ports:
+          - 8800:5432
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: sqlx-${{ env.SQLX_VERSION }}
+      - name: Install sqlx-cli
+        run:
+          cargo install sqlx-cli
+          --version=${{ env.SQLX_VERSION }}
+          --features=${{ env.SQLX_FEATURES }}
+          --no-default-features
+          --locked
+      - name: Install postgresql-client
+        run: sudo apt-get update && sudo apt-get install postgresql-client -y
+      - name: Migrate datebase
+        run: chmod +x ./scripts/init_db.sh && SKIP_DOCKER=true ./scripts/init_db.sh
+      - name: Linting
+        run: cargo clippy -- -D warnings
+          
+
+
+  coverage:
+    name: Code coverage
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password 
+          POSTGRES_DB: postgres
+        ports:
+          - 8800:5432
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: sqlx-${{ env.SQLX_VERSION }}
+      - name: Install postgresql-client
+        run: sudo apt-get update && sudo apt-get install postgresql-client -y
+      - name: Install sqlx-cli
+        run:
+          cargo install sqlx-cli
+          --version=${{ env.SQLX_VERSION }}
+          --features=${{ env.SQLX_FEATURES }}
+          --no-default-features
+          --locked
+      - name: Migrate database
+        run: chmod +x ./scripts/init_db.sh && SKIP_DOCKER=true ./scripts/init_db.sh
+      - name: Generate code coverage
+        run: cargo install cargo-tarpaulin && cargo tarpaulin --verbose --workspace
